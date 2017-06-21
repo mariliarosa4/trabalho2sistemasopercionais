@@ -4,28 +4,34 @@
 #include <semaphore.h>
 #include <time.h>
 #include <string.h>
+#include <signal.h>
+#include <unistd.h>
+#include <conio.h>
 
 #define NUMEROTHREADS_USUARIOS 50
 #define CONTEUDO_IMPRESSAO 0
 #define MAXIMO_TEXTO_IMPRESSO 100
 #define TRUE 1
 #define TAMANHOFILA 50
-
+    pthread_t impressoraThread;
+pthread_t threadInterface;
+    void *threadInterface_result;
+    void *impressora_result;
 int statusImpressoraAtiva = 0;
-int tempoAtiva=-1;
+int tempoAtiva = -1;
 int threadImpressao = -1;
+int pausarImpressora = 1;
 struct Fila fila;
 char impressaoAleatoria[MAXIMO_TEXTO_IMPRESSO];
 char bufferThreadsUsuarios[NUMEROTHREADS_USUARIOS][CONTEUDO_IMPRESSAO];
 sem_t semaforoThreadUsuario[NUMEROTHREADS_USUARIOS];
 sem_t sessaoCritica;
 sem_t statusImpressora;
+
 void inserirNoBuffer(int idThreadUsuario);
 void gerarFraseAleatoria();
 void gerarInterface();
-void impressora();
-
-
+void* impressora();
 struct BufferThreads {
     int idThread;
     int statusImpressao;
@@ -59,7 +65,7 @@ void inserir(struct Fila *f, int idThread, int statusImpressao, char *texto) {
 
 }
 
-struct BufferThreads remover(struct Fila *f) { 
+struct BufferThreads remover(struct Fila *f) {
     struct BufferThreads temp = f->buffer[f->primeiro++];
     if (f->primeiro == f->capacidade)
         f->primeiro = 0;
@@ -67,8 +73,8 @@ struct BufferThreads remover(struct Fila *f) {
     return temp;
 }
 
-struct BufferThreads primeiroFila(struct Fila *f){
-	  return f->buffer[f->primeiro];
+struct BufferThreads primeiroFila(struct Fila *f) {
+    return f->buffer[f->primeiro];
 }
 
 int estaVazia(struct Fila *f) { // retorna verdadeiro se a fila está vazia
@@ -99,28 +105,49 @@ void* usuario(void *j) {
 
 
         inserirNoBuffer(idThreadUsuario);
-        // retirarDoBuffer(idThreadUsuario);
+
     }
     pthread_exit(0);
 }
 
 void* interface() {
 
+    char opcao;
+    int idImpressao;
+    while (!kbhit()) { //funcao kbhit da biblioteca conio.h 
 
-    while (TRUE) {
 
-	impressora();
         gerarInterface();
-	
+
     }
+    fflush(stdin);
+    printf("E ----- excluir impressao \n");
+    printf("S ----- suspender impressao \n");
+    opcao = getchar();
+    printf("\n Informe o id da impressao desejada");
+    scanf("%d", &idImpressao);
+if (opcao=='E' && idImpressao==threadImpressao){
+	pausarImpressora=0;
+	threadImpressao=-1;
+	 finalizarImpressao();
+	printf("pausar impressora");
+	sleep(1);
+}
+    printf("tchau");
+    pausarImpressora=1;
+    pthread_create(&threadInterface, NULL, interface, NULL);
+    pthread_join(threadInterface, &threadInterface_result);
+    sleep(3);
+    pthread_create(&impressoraThread, NULL, impressora, NULL);
+     pthread_join(impressoraThread, &impressora_result);
+
 }
 
 void gerarInterface() {
     system("cls"); //unix system("clear");
     printf("\n ----------- interface -----------------\n");
-    printf("E idImpressao ----- excluir impressao \n");
-    printf("S idImpressao ----- suspender impressao \n");
-  printf ("\n imprimindo thread %d  \n", threadImpressao);
+    printf("\n Pressione qualquer tecla para interagir com a impressora\n ");
+    printf("\n imprimindo thread %d  \n", threadImpressao);
     printf(" ID IMPRESSAO   |   STATUS   |  TEXTO IMPRESSAO \n ");
 
 
@@ -129,34 +156,42 @@ void gerarInterface() {
 
     } else {
         mostrarFila(&fila);
-  sleep(3);
+        sleep(3);
     }
 
-  
-}
-
-void impressora() {
-    
-if (tempoAtiva>0){
-	tempoAtiva--;
-}else{
-	
-	tempoAtiva=2;
-	if (threadImpressao!=-1){
-			remover(&fila);
-	}
-
-	 struct BufferThreads bufferParaImpressao = primeiroFila(&fila);
-	 
-    sleep(8);
-      threadImpressao = bufferParaImpressao.idThread;
-
-    
-	statusImpressoraAtiva=1;
-}
 
 }
 
+void* impressora() {
+	  printf("to na impressora");
+    while (pausarImpressora) {
+        printf("to na impressora");
+        sleep(1);
+int contadorSleep = 0;
+
+        struct BufferThreads bufferParaImpressao = primeiroFila(&fila);
+        threadImpressao = bufferParaImpressao.idThread;
+
+        if (threadImpressao > 0) {
+        	while (pausarImpressora && contadorSleep<10){
+        		 sleep(1);
+        		 contadorSleep++;
+			}
+           
+             finalizarImpressao();
+             
+			         }
+
+
+
+
+    }
+    printf("impressora pausada");
+}
+void finalizarImpressao(){
+	sem_post(&semaforoThreadUsuario[threadImpressao]);
+            remover(&fila);
+}
 void gerarFraseAleatoria() {
     {
         int posicao = 0, auxiliarAscii;
@@ -172,30 +207,29 @@ void gerarFraseAleatoria() {
 }
 
 void inserirNoBuffer(int idThreadUsuario) {
-
+sem_wait(&semaforoThreadUsuario[idThreadUsuario]);
     sem_wait(&sessaoCritica);
-   // sem_wait(&semaforoThreadUsuario[idThreadUsuario]);
+
 
     gerarFraseAleatoria();
     sleep(2);
     inserir(&fila, idThreadUsuario, 1, impressaoAleatoria);
-
-  
-sleep(4);
+sleep(2);
+     
     sem_post(&sessaoCritica);
 }
-
 
 main() {
     criarFila(&fila);
     void *thread_result;
-    void *threadInterface_result;
+
     pthread_t thread[NUMEROTHREADS_USUARIOS];
-    pthread_t threadInterface;
+
+
     int idUsuario;
     sem_init(&sessaoCritica, 0, 1);
     sem_init(&statusImpressora, 0, 1);
-    
+
 
     for (idUsuario = 0; idUsuario < NUMEROTHREADS_USUARIOS; idUsuario++) {
         sem_init(&semaforoThreadUsuario[idUsuario], 0, 1);
@@ -204,12 +238,14 @@ main() {
         pthread_create(&thread[idUsuario], NULL, usuario, &idUsuario);
     }
     pthread_create(&threadInterface, NULL, interface, NULL);
-    pthread_join(threadInterface, &threadInterface_result);
+    pthread_create(&impressoraThread, NULL, impressora, NULL);
     for (idUsuario = 0; idUsuario < NUMEROTHREADS_USUARIOS; idUsuario++) {
 
 
         pthread_join(thread[idUsuario], &thread_result);
     }
+    pthread_join(threadInterface, &threadInterface_result);
 
+    pthread_join(impressoraThread, &impressora_result);
 
 }
