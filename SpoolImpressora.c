@@ -12,91 +12,189 @@
 #define CONTEUDO_IMPRESSAO 0
 #define MAXIMO_TEXTO_IMPRESSO 100
 #define TRUE 1
-#define TAMANHOFILA 50
-    pthread_t impressoraThread;
+#include <stdbool.h>
+pthread_t impressoraThread;
 pthread_t threadInterface;
-    void *threadInterface_result;
-    void *impressora_result;
+void *threadInterface_result;
+void *impressora_result;
 int statusImpressoraAtiva = 0;
 int tempoAtiva = -1;
 int threadImpressao = -1;
 int pausarImpressora = 1;
-struct Fila fila;
 char impressaoAleatoria[MAXIMO_TEXTO_IMPRESSO];
 char bufferThreadsUsuarios[NUMEROTHREADS_USUARIOS][CONTEUDO_IMPRESSAO];
 sem_t semaforoThreadUsuario[NUMEROTHREADS_USUARIOS];
 sem_t sessaoCritica;
 sem_t statusImpressora;
 
+
 void inserirNoBuffer(int idThreadUsuario);
 void gerarFraseAleatoria();
 void gerarInterface();
 void* impressora();
-struct BufferThreads {
-    int idThread;
+
+typedef struct dataNode {
+    int id;
     int statusImpressao;
-    char texto[MAXIMO_TEXTO_IMPRESSO];
-};
+    char texto[100];
+} DataNode;
+DataNode data;
 
-struct Fila {
-    int capacidade;
-    struct BufferThreads buffer[NUMEROTHREADS_USUARIOS];
-    int primeiro;
-    int ultimo;
-    int nItens;
-};
+typedef struct node {
+    DataNode data;
+    struct node* next;
+} Node;
 
-void criarFila(struct Fila *f) {
-    f->capacidade = TAMANHOFILA;
-    f->primeiro = 0;
-    f->ultimo = -1;
-    f->nItens = 0;
+Node* nodoEmImpressao;
+
+typedef struct list {
+    int size;
+    Node* head;
+} List;
+List *l;
+
+Node* atPos(List* list, int index);
+
+List* createList() {
+    List* list = (List*) malloc(sizeof (List));
+    list->size = 0;
+    list->head = NULL;
+    return list;
 }
 
-void inserir(struct Fila *f, int idThread, int statusImpressao, char *texto) {
-    if (f->ultimo == f->capacidade - 1)
-        f->ultimo = -1;
-    f->ultimo++;
-    f->buffer[f->ultimo].idThread = idThread;
-    f->buffer[f->ultimo].statusImpressao = statusImpressao;
-    strcpy(f->buffer[f->ultimo].texto, texto);
-
-    f->nItens++;
-
+void push(List *list, DataNode data) {
+    Node* node = (Node*) malloc(sizeof (Node));
+    node->data = data;
+    node->next = list->head;
+    list->head = node;
+    list->size++;
 }
 
-struct BufferThreads remover(struct Fila *f) {
-    struct BufferThreads temp = f->buffer[f->primeiro++];
-    if (f->primeiro == f->capacidade)
-        f->primeiro = 0;
-    f->nItens--;
-    return temp;
+void printList(List* list) {
+    Node* pointer = list->head;
+    if (pointer == NULL) {
+        printf("Lista vazia");
+    }
+    while (pointer != NULL) {
+        printf("\n       %d        |      %d     | %s \n", pointer->data.id, pointer->data.statusImpressao, pointer->data.texto);
+
+
+        pointer = pointer->next;
+    }
 }
 
-struct BufferThreads primeiroFila(struct Fila *f) {
-    return f->buffer[f->primeiro];
+int indexOf(List* list, Node* node) {
+    if (node != NULL) {
+        Node* pointer = list->head;
+        int index = 0;
+
+        while (pointer != node && pointer != NULL) {
+            pointer = pointer->next;
+            index++;
+        }
+        if (pointer != NULL) {
+            return index;
+        }
+    }
+    return -1;
 }
 
-int estaVazia(struct Fila *f) { // retorna verdadeiro se a fila está vazia
-    return (f->nItens == 0);
+void erase(List* list, int index) {
+    if (index == 0) {
+        pop(list);
+    } else {
+        Node* current = atPos(list, index);
+        if (current != NULL) {
+            Node* previous = atPos(list, index - 1);
+            previous->next = current->next;
+
+            free(current);
+            list->size--;
+        }
+
+
+    }
 }
 
-int estaCheia(struct Fila *f) { // retorna verdadeiro se a fila está cheia
-    return (f->nItens == f->capacidade);
+Node* atPos(List* list, int index) {
+    if (index >= 0 && index < list->size) {
+        Node* node = list->head;
+        int i;
+        for (i = 0; i < index; i++) {
+            node = node->next;
+        }
+        return node;
+    }
 }
 
-void mostrarFila(struct Fila *f) {
+bool isEmpty(List* list) {
+    return (list->size == 0);
+}
 
-    int cont, i;
-    i = f->primeiro;
-    while (i <= f->ultimo) {
-        printf("\n       %d        |      %d     | %s \n", f->buffer[i].idThread, f->buffer[i].statusImpressao, f->buffer[i].texto);
-        i++;
+void pop(List* list) {
+    if (!isEmpty(list)) {
+
+        Node* pointer = list->head;
+
+        list->head = pointer->next;
+        free(pointer);
+        list->size--;
+    }
+}
+
+void xchgNodes(List* list, Node* nodeA, Node* nodeB) {
+
+    if (nodeA == nodeB) {
+        return;
+    }
+    int indexA = indexOf(list, nodeA);
+    int indexB = indexOf(list, nodeB);
+
+    if (indexA == -1 || indexB == -1) {
+        return;
+    }
+    if (indexA > indexB) {
+        nodeA = nodeB;
+        nodeB = atPos(list, indexA);
+        indexA = indexB;
+        indexB = indexOf(list, nodeB);
+    }
+    Node* pb = atPos(list, indexB - 1);
+    if (nodeA == list->head) {
+        list->head = nodeB;
+
+    } else {
+        Node* pa = atPos(list, indexA - 1);
+        pa->next = nodeB;
     }
 
+    pb->next = nodeA;
+    Node* pointer = nodeA->next;
+    nodeA->next = nodeB->next;
+    nodeB->next = pointer;
 
-    printf("\n\n");
+}
 
+Node* max(List* list, int index) {
+    Node* pointer = atPos(list, index);
+    if (pointer != NULL) {
+        Node* maxNode = pointer;
+        while (pointer != NULL) {
+            if (pointer->data.id > maxNode->data.id) {
+                maxNode = pointer;
+            }
+            pointer = pointer->next;
+        }
+        return maxNode;
+    }
+    return NULL;
+}
+
+void decSort(List* list) {
+    int i;
+    for (i = 0; i < list->size - 1; i++) {
+        xchgNodes(list, atPos(list, i), max(list, i));
+    }
 }
 
 void* usuario(void *j) {
@@ -109,7 +207,18 @@ void* usuario(void *j) {
     }
     pthread_exit(0);
 }
-
+	Node* findNodeByIdThread(List *list, int idThread){
+			
+			Node* node=list->head;
+			int i;
+			for(i=0;i<list->size-1;i++){
+				if(node->data.id==5){
+					return node;
+				}
+				node=node->next;
+			}
+			return node;
+		}
 void* interface() {
 
     char opcao;
@@ -120,42 +229,49 @@ void* interface() {
         gerarInterface();
 
     }
+    system("color fc");
     fflush(stdin);
-    printf("E ----- excluir impressao \n");
-    printf("S ----- suspender impressao \n");
-    opcao = getchar();
-    printf("\n Informe o id da impressao desejada");
-    scanf("%d", &idImpressao);
-if (opcao=='E' && idImpressao==threadImpressao){
-	pausarImpressora=0;
-	threadImpressao=-1;
-	 finalizarImpressao();
-	printf("pausar impressora");
-	sleep(1);
-}
-    printf("tchau");
-    pausarImpressora=1;
-    pthread_create(&threadInterface, NULL, interface, NULL);
-    pthread_join(threadInterface, &threadInterface_result);
-    sleep(3);
-    pthread_create(&impressoraThread, NULL, impressora, NULL);
-     pthread_join(impressoraThread, &impressora_result);
+    fflush(stdin);
 
+    opcao = getche();
+    printf("\n Informe o id da impressao desejada: ");
+    scanf("%d", &idImpressao);
+    if ((opcao == 'S' || opcao == 's') && idImpressao == threadImpressao) {
+        pausarImpressora = 0;
+        threadImpressao = -1;
+        finalizarImpressao();
+        printf("\n Impressao suspensa");
+        sleep(1);
+         pausarImpressora = 1;
+    pthread_create(&threadInterface, NULL, interface, NULL);
+    pthread_create(&impressoraThread, NULL, impressora, NULL);
+
+    pthread_join(threadInterface, &threadInterface_result);
+    pthread_join(impressoraThread, &impressora_result);
+    }
+    if ((opcao == 'E' || opcao == 'e')) {
+       erase(l, indexOf(l, findNodeByIdThread(l,idImpressao)));
+        printf("\n ........ Impressao excluida do buffer");
+        sleep(2);
+    }
+    pthread_create(&threadInterface, NULL, interface, NULL);
+ pthread_join(threadInterface, &threadInterface_result);
 }
 
 void gerarInterface() {
     system("cls"); //unix system("clear");
     printf("\n ----------- interface -----------------\n");
-    printf("\n Pressione qualquer tecla para interagir com a impressora\n ");
+    printf("\n Pressione as opcoes abaixo para interagir com a impressora \n");
+    printf("E ----- excluir impressao \n");
+    printf("S ----- suspender impressao \n");
     printf("\n imprimindo thread %d  \n", threadImpressao);
     printf(" ID IMPRESSAO   |   STATUS   |  TEXTO IMPRESSAO \n ");
 
-
-    if (fila.nItens == 0) {
+    if (isEmpty(l)) {
         printf("\n nada para imprimir");
 
     } else {
-        mostrarFila(&fila);
+        printList(l);
         sleep(3);
     }
 
@@ -163,42 +279,41 @@ void gerarInterface() {
 }
 
 void* impressora() {
-	  printf("to na impressora");
     while (pausarImpressora) {
-        printf("to na impressora");
+
         sleep(1);
-int contadorSleep = 0;
-
-        struct BufferThreads bufferParaImpressao = primeiroFila(&fila);
-        threadImpressao = bufferParaImpressao.idThread;
-
-        if (threadImpressao > 0) {
-        	while (pausarImpressora && contadorSleep<10){
-        		 sleep(1);
-        		 contadorSleep++;
-			}
-           
-             finalizarImpressao();
-             
-			         }
+        int contadorSleep = 0;
 
 
+        if (!isEmpty(l)) {
+            nodoEmImpressao = l->head;
+            threadImpressao = l->head->data.id;
 
-
+            if (threadImpressao > 0) {
+                while (pausarImpressora && contadorSleep < 20) {
+                    sleep(1);
+                    contadorSleep++;
+                }
+                if (pausarImpressora) {
+                    finalizarImpressao();
+                }
+            }
+        }
     }
-    printf("impressora pausada");
 }
-void finalizarImpressao(){
-	sem_post(&semaforoThreadUsuario[threadImpressao]);
-            remover(&fila);
+
+void finalizarImpressao() {
+    printf("\n\n ...... finalizando impressao");
+    sleep(2);
+    sem_post(&semaforoThreadUsuario[threadImpressao]);
+    erase(l, indexOf(l, nodoEmImpressao));
 }
+
 void gerarFraseAleatoria() {
     {
         int posicao = 0, auxiliarAscii;
-
         srand(time(NULL));
         while (posicao < MAXIMO_TEXTO_IMPRESSO) {
-
             auxiliarAscii = (65 + rand() % (91 - 65));
             impressaoAleatoria[posicao] = (char) auxiliarAscii;
             posicao++;
@@ -207,20 +322,22 @@ void gerarFraseAleatoria() {
 }
 
 void inserirNoBuffer(int idThreadUsuario) {
-sem_wait(&semaforoThreadUsuario[idThreadUsuario]);
+    sem_wait(&semaforoThreadUsuario[idThreadUsuario]);
     sem_wait(&sessaoCritica);
-
-
     gerarFraseAleatoria();
     sleep(2);
-    inserir(&fila, idThreadUsuario, 1, impressaoAleatoria);
-sleep(2);
-     
+    system("color 02");
+    data.id = idThreadUsuario;
+    data.statusImpressao = 1;
+    strcpy(data.texto, impressaoAleatoria);
+    push(l, data);
+    decSort(l);
+    sleep(4);
     sem_post(&sessaoCritica);
 }
 
 main() {
-    criarFila(&fila);
+    l = createList();
     void *thread_result;
 
     pthread_t thread[NUMEROTHREADS_USUARIOS];
@@ -249,3 +366,4 @@ main() {
     pthread_join(impressoraThread, &impressora_result);
 
 }
+
