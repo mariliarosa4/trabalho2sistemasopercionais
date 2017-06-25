@@ -7,76 +7,95 @@
 #include <signal.h>
 #include <unistd.h>
 #include <conio.h>
+#include <stdbool.h>
 
 #define NUMEROTHREADS_USUARIOS 50
 #define CONTEUDO_IMPRESSAO 0
 #define MAXIMO_TEXTO_IMPRESSO 100
 #define TRUE 1
-#include <stdbool.h>
+#define MAXIMO_PAGINAS 40
+
 pthread_t impressoraThread;
 pthread_t threadInterface;
 void *threadInterface_result;
 void *impressora_result;
-int statusImpressoraAtiva = 0;
 int tempoAtiva = -1;
 int threadImpressao = -1;
 int pausarImpressora = 1;
+int tempoImpressao = 0;
 char impressaoAleatoria[MAXIMO_TEXTO_IMPRESSO];
 char bufferThreadsUsuarios[NUMEROTHREADS_USUARIOS][CONTEUDO_IMPRESSAO];
 sem_t semaforoThreadUsuario[NUMEROTHREADS_USUARIOS];
 sem_t sessaoCritica;
-sem_t statusImpressora;
+
 
 
 void inserirNoBuffer(int idThreadUsuario);
 void gerarFraseAleatoria();
 void gerarInterface();
 void* impressora();
+void* usuario();
+void* interface();
+List* iniciarLista() ;
+void inserir(List *list, DadosBuffer data) ;
+void mostrarLista(List* list) ;
+int indexOf(List* list, Node* node) ;
+void apagarNodoPorPosicao(List* list, int index) ;
+Node* posicao(List* list, int index) ;
+bool isEmpty(List* list) ;
+void apagarPrimeiroNodo(List* list) ;
+void trocarNodosDeLugar(List* list, Node* nodeA, Node* nodeB) ;
+Node* menorNodo(List* list, int index) ;
+void ordenarListaMenorMaior(List* list) ;
+Node* findNodeByIdThread(List *list, int idThread) ;
 
-typedef struct dataNode {
+typedef struct dadosBuffer {
+    int numeroPaginas;
     int id;
     int statusImpressao;
-    char texto[100];
-} DataNode;
-DataNode data;
+    char texto[200];
+} DadosBuffer;
+DadosBuffer data;
+DadosBuffer dataSuspenso;
 
 typedef struct node {
-    DataNode data;
+    DadosBuffer dadosNodo;
     struct node* next;
 } Node;
 
 Node* nodoEmImpressao;
 
-typedef struct list {
+typedef struct lista {
     int size;
     Node* head;
 } List;
 List *l;
+List *suspensos;
+Node* posicao(List* list, int index);
 
-Node* atPos(List* list, int index);
-
-List* createList() {
+List* iniciarLista() {
     List* list = (List*) malloc(sizeof (List));
     list->size = 0;
     list->head = NULL;
     return list;
 }
 
-void push(List *list, DataNode data) {
+
+void inserir(List *list, DadosBuffer data) {
     Node* node = (Node*) malloc(sizeof (Node));
-    node->data = data;
+    node->dadosNodo = data;
     node->next = list->head;
     list->head = node;
     list->size++;
 }
 
-void printList(List* list) {
+void mostrarLista(List* list) {
     Node* pointer = list->head;
     if (pointer == NULL) {
         printf("Lista vazia");
     }
     while (pointer != NULL) {
-        printf("\n       %d        |      %d     | %s \n", pointer->data.id, pointer->data.statusImpressao, pointer->data.texto);
+        printf("\n       %d       |      %d      |      %d     | %s \n", pointer->dadosNodo.id, pointer->dadosNodo.numeroPaginas, pointer->dadosNodo.statusImpressao, pointer->dadosNodo.texto);
 
 
         pointer = pointer->next;
@@ -99,13 +118,13 @@ int indexOf(List* list, Node* node) {
     return -1;
 }
 
-void erase(List* list, int index) {
+void apagarNodoPorPosicao(List* list, int index) {
     if (index == 0) {
-        pop(list);
+        apagarPrimeiroNodo(list);
     } else {
-        Node* current = atPos(list, index);
+        Node* current = posicao(list, index);
         if (current != NULL) {
-            Node* previous = atPos(list, index - 1);
+            Node* previous = posicao(list, index - 1);
             previous->next = current->next;
 
             free(current);
@@ -116,7 +135,8 @@ void erase(List* list, int index) {
     }
 }
 
-Node* atPos(List* list, int index) {
+
+Node* posicao(List* list, int index) {
     if (index >= 0 && index < list->size) {
         Node* node = list->head;
         int i;
@@ -131,7 +151,7 @@ bool isEmpty(List* list) {
     return (list->size == 0);
 }
 
-void pop(List* list) {
+void apagarPrimeiroNodo(List* list) {
     if (!isEmpty(list)) {
 
         Node* pointer = list->head;
@@ -142,7 +162,7 @@ void pop(List* list) {
     }
 }
 
-void xchgNodes(List* list, Node* nodeA, Node* nodeB) {
+void trocarNodosDeLugar(List* list, Node* nodeA, Node* nodeB) {
 
     if (nodeA == nodeB) {
         return;
@@ -155,16 +175,16 @@ void xchgNodes(List* list, Node* nodeA, Node* nodeB) {
     }
     if (indexA > indexB) {
         nodeA = nodeB;
-        nodeB = atPos(list, indexA);
+        nodeB = posicao(list, indexA);
         indexA = indexB;
         indexB = indexOf(list, nodeB);
     }
-    Node* pb = atPos(list, indexB - 1);
+    Node* pb = posicao(list, indexB - 1);
     if (nodeA == list->head) {
         list->head = nodeB;
 
     } else {
-        Node* pa = atPos(list, indexA - 1);
+        Node* pa = posicao(list, indexA - 1);
         pa->next = nodeB;
     }
 
@@ -175,25 +195,26 @@ void xchgNodes(List* list, Node* nodeA, Node* nodeB) {
 
 }
 
-Node* max(List* list, int index) {
-    Node* pointer = atPos(list, index);
+
+Node* menorNodo(List* list, int index) {
+    Node* pointer = posicao(list, index);
     if (pointer != NULL) {
-        Node* maxNode = pointer;
+        Node* minNode = pointer;
         while (pointer != NULL) {
-            if (pointer->data.id > maxNode->data.id) {
-                maxNode = pointer;
+            if (pointer->dadosNodo.numeroPaginas < minNode->dadosNodo.numeroPaginas) {
+                minNode = pointer;
             }
             pointer = pointer->next;
         }
-        return maxNode;
+        return minNode;
     }
     return NULL;
 }
 
-void decSort(List* list) {
+void ordenarListaMenorMaior(List* list) {
     int i;
     for (i = 0; i < list->size - 1; i++) {
-        xchgNodes(list, atPos(list, i), max(list, i));
+        trocarNodosDeLugar(list, posicao(list, i), menorNodo(list, i));
     }
 }
 
@@ -207,18 +228,20 @@ void* usuario(void *j) {
     }
     pthread_exit(0);
 }
-	Node* findNodeByIdThread(List *list, int idThread){
-			
-			Node* node=list->head;
-			int i;
-			for(i=0;i<list->size-1;i++){
-				if(node->data.id==5){
-					return node;
-				}
-				node=node->next;
-			}
-			return node;
-		}
+
+Node* findNodeByIdThread(List *list, int idThread) {
+
+    Node* node = list->head;
+    int i;
+    for (i = 0; i < list->size - 1; i++) {
+        if (node->dadosNodo.id == idThread) {
+            return node;
+        }
+        node = node->next;
+    }
+    return node;
+}
+
 void* interface() {
 
     char opcao;
@@ -236,26 +259,83 @@ void* interface() {
     opcao = getche();
     printf("\n Informe o id da impressao desejada: ");
     scanf("%d", &idImpressao);
-    if ((opcao == 'S' || opcao == 's') && idImpressao == threadImpressao) {
-        pausarImpressora = 0;
-        threadImpressao = -1;
-        finalizarImpressao();
-        printf("\n Impressao suspensa");
-        sleep(1);
-         pausarImpressora = 1;
-    pthread_create(&threadInterface, NULL, interface, NULL);
-    pthread_create(&impressoraThread, NULL, impressora, NULL);
+    if ((opcao == 'S' || opcao == 's')) {
+        if (idImpressao == threadImpressao) {
+            printf("Voce nao pode suspender a impressao atual - Processo nao-preemptivo");
+            sleep(1);
+        } else {
+            Node* retorno = (findNodeByIdThread(l, idImpressao));
+            if (retorno) {
+                dataSuspenso.id = retorno->dadosNodo.id;
+                dataSuspenso.statusImpressao = 3;
 
-    pthread_join(threadInterface, &threadInterface_result);
-    pthread_join(impressoraThread, &impressora_result);
+                dataSuspenso.numeroPaginas = retorno->dadosNodo.numeroPaginas;
+              
+                strcpy(dataSuspenso.texto, retorno->dadosNodo.texto);
+                inserir(suspensos, dataSuspenso);
+
+                apagarNodoPorPosicao(l, indexOf(l, retorno));
+
+                fflush(stdin);
+                sleep(1);
+            } else {
+                printf("Impressao nao encontrada!");
+                sleep(1);
+            }
+        }
+
+    }
+    if ((opcao == 'R' || opcao == 'r')) {
+        if (!isEmpty(suspensos)) {
+            if (idImpressao == threadImpressao) {
+                printf("Voce nao pode suspender a impressao atual - Processo nao-preemptivo");
+                sleep(1);
+            } else {
+                Node* retorno = (findNodeByIdThread(suspensos, idImpressao));
+                if (retorno) {
+                    data.id = retorno->dadosNodo.id;
+                    data.statusImpressao = 1;
+                    data.numeroPaginas = retorno->dadosNodo.numeroPaginas;
+
+                    strcpy(data.texto, retorno->dadosNodo.texto);
+                    inserir(l, data);
+
+                    apagarNodoPorPosicao(suspensos, indexOf(suspensos, retorno));
+                   
+                    fflush(stdin);
+                    sleep(1);
+                } else {
+                    printf("Impressao nao encontrada!");
+                    sleep(1);
+                }
+            }
+        } else {
+            printf("Nao ha impressão para retomar!");
+            sleep(1);
+        }
     }
     if ((opcao == 'E' || opcao == 'e')) {
-       erase(l, indexOf(l, findNodeByIdThread(l,idImpressao)));
-        printf("\n ........ Impressao excluida do buffer");
-        sleep(2);
+        if (idImpressao == threadImpressao) {
+            pausarImpressora = 0;
+            threadImpressao = -1;
+            finalizarImpressao();
+            printf("\n Impressao atual excluida! ");
+            sleep(1);
+            pausarImpressora = 1;
+            pthread_create(&threadInterface, NULL, interface, NULL);
+            pthread_create(&impressoraThread, NULL, impressora, NULL);
+
+            pthread_join(threadInterface, &threadInterface_result);
+            pthread_join(impressoraThread, &impressora_result);
+        } else {
+
+            apagarNodoPorPosicao(l, indexOf(l, findNodeByIdThread(l, idImpressao)));
+            printf("\n ........ Impressao excluida do buffer");
+            sleep(2);
+        }
     }
     pthread_create(&threadInterface, NULL, interface, NULL);
- pthread_join(threadInterface, &threadInterface_result);
+    pthread_join(threadInterface, &threadInterface_result);
 }
 
 void gerarInterface() {
@@ -264,14 +344,19 @@ void gerarInterface() {
     printf("\n Pressione as opcoes abaixo para interagir com a impressora \n");
     printf("E ----- excluir impressao \n");
     printf("S ----- suspender impressao \n");
+    printf("R ----- retomar impressao \n");
     printf("\n imprimindo thread %d  \n", threadImpressao);
-    printf(" ID IMPRESSAO   |   STATUS   |  TEXTO IMPRESSAO \n ");
+    printf(" ID IMPRESSAO   |   PAGINAS   |   STATUS   |  TEXTO IMPRESSAO \n ");
 
     if (isEmpty(l)) {
-        printf("\n nada para imprimir");
+        printf("\n >>>> Nao ha impressoes!");
 
     } else {
-        printList(l);
+        mostrarLista(l);
+        if (!isEmpty(suspensos)) {
+            mostrarLista(suspensos);
+        }
+
         sleep(3);
     }
 
@@ -287,10 +372,12 @@ void* impressora() {
 
         if (!isEmpty(l)) {
             nodoEmImpressao = l->head;
-            threadImpressao = l->head->data.id;
+            threadImpressao = l->head->dadosNodo.id;
+            tempoImpressao = l->head->dadosNodo.numeroPaginas;
+            l->head->dadosNodo.statusImpressao = 2;
 
             if (threadImpressao > 0) {
-                while (pausarImpressora && contadorSleep < 20) {
+                while (pausarImpressora && contadorSleep < tempoImpressao) {
                     sleep(1);
                     contadorSleep++;
                 }
@@ -306,13 +393,14 @@ void finalizarImpressao() {
     printf("\n\n ...... finalizando impressao");
     sleep(2);
     sem_post(&semaforoThreadUsuario[threadImpressao]);
-    erase(l, indexOf(l, nodoEmImpressao));
+    apagarNodoPorPosicao(l, indexOf(l, nodoEmImpressao));
 }
 
 void gerarFraseAleatoria() {
     {
-        int posicao = 0, auxiliarAscii;
+        int posicao = 0, auxiliarAscii = 0;
         srand(time(NULL));
+        fflush(stdin);
         while (posicao < MAXIMO_TEXTO_IMPRESSO) {
             auxiliarAscii = (65 + rand() % (91 - 65));
             impressaoAleatoria[posicao] = (char) auxiliarAscii;
@@ -322,6 +410,7 @@ void gerarFraseAleatoria() {
 }
 
 void inserirNoBuffer(int idThreadUsuario) {
+    srand(time(NULL));
     sem_wait(&semaforoThreadUsuario[idThreadUsuario]);
     sem_wait(&sessaoCritica);
     gerarFraseAleatoria();
@@ -329,15 +418,18 @@ void inserirNoBuffer(int idThreadUsuario) {
     system("color 02");
     data.id = idThreadUsuario;
     data.statusImpressao = 1;
+    data.numeroPaginas = (rand()) % MAXIMO_PAGINAS + 1;
     strcpy(data.texto, impressaoAleatoria);
-    push(l, data);
-    decSort(l);
+    fflush(stdin);
+    inserir(l, data);
+    ordenarListaMenorMaior(l);
     sleep(4);
     sem_post(&sessaoCritica);
 }
 
 main() {
-    l = createList();
+    l = iniciarLista();
+    suspensos = iniciarLista();
     void *thread_result;
 
     pthread_t thread[NUMEROTHREADS_USUARIOS];
@@ -345,7 +437,7 @@ main() {
 
     int idUsuario;
     sem_init(&sessaoCritica, 0, 1);
-    sem_init(&statusImpressora, 0, 1);
+
 
 
     for (idUsuario = 0; idUsuario < NUMEROTHREADS_USUARIOS; idUsuario++) {
@@ -356,6 +448,7 @@ main() {
     }
     pthread_create(&threadInterface, NULL, interface, NULL);
     pthread_create(&impressoraThread, NULL, impressora, NULL);
+
     for (idUsuario = 0; idUsuario < NUMEROTHREADS_USUARIOS; idUsuario++) {
 
 
